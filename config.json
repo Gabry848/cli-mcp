@@ -1,13 +1,12 @@
 {
   "security": {
     "allowedPartitions": [
-      "C:\\Users\\",
-      "D:\\Projects\\",
-      "E:\\Development\\"
+      "E:\\"
     ],
+    "defaultPath": "E:\\",
     "blockedCommands": [
       "rm",
-      "rmdir", 
+      "rmdir",
       "del",
       "format",
       "fdisk",
@@ -38,11 +37,7 @@
       "powercfg",
       "bcdedit"
     ],
-    "allowedCommandPatterns": [
-      "^(ls|dir|cd|pwd|echo|cat|type|find|grep|head|tail|sort|wc)\\b",
-      "^(git|npm|node|python|pip)\\b",
-      "^(Get-|Set-|New-|Remove-).*(Process|Service|Item|Content|Location)\\b"
-    ],
+    "allowedCommandPatterns": [],
     "maxCommandLength": 500,
     "timeoutSeconds": 30,
     "allowNetworkCommands": false

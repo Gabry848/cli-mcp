@@ -13,6 +13,7 @@ const execAsync = promisify(exec);
 const DEFAULT_CONFIG = {
   security: {
     allowedPartitions: [], // Empty array means all partitions allowed
+    defaultPath: process.cwd(), // Default working directory
     blockedCommands: [
       "rm", "rmdir", "del", "format", "fdisk", "diskpart",
       "shutdown", "reboot", "restart", "halt", "poweroff",
@@ -85,11 +86,12 @@ function isCommandAllowed(command) {
 }
 
 function isPathAllowed(workingDirectory) {
-  if (!workingDirectory) return { allowed: true };
+  // Use default path if no working directory is specified
+  const pathToCheck = workingDirectory || config.security.defaultPath;
   
   // Check allowed partitions
   if (config.security.allowedPartitions.length > 0) {
-    const normalizedPath = path.normalize(workingDirectory).toLowerCase();
+    const normalizedPath = path.normalize(pathToCheck).toLowerCase();
     const allowed = config.security.allowedPartitions.some(partition => {
       const normalizedPartition = path.normalize(partition).toLowerCase();
       return normalizedPath.startsWith(normalizedPartition);
@@ -98,7 +100,7 @@ function isPathAllowed(workingDirectory) {
     if (!allowed) {
       return { 
         allowed: false, 
-        reason: `Access to path '${workingDirectory}' is not allowed. Allowed partitions: ${config.security.allowedPartitions.join(', ')}` 
+        reason: `Access to path '${pathToCheck}' is not allowed. Allowed partitions: ${config.security.allowedPartitions.join(', ')}` 
       };
     }
   }
@@ -157,7 +159,7 @@ server.registerTool("powershell",
     }
 
     try {
-      const cwd = workingDirectory || process.cwd();
+      const cwd = workingDirectory || config.security.defaultPath;
       const { stdout, stderr } = await execAsync(`powershell.exe -Command "${command.replace(/"/g, '""')}"`, { 
         cwd,
         timeout: config.security.timeoutSeconds * 1000
@@ -217,7 +219,7 @@ server.registerTool("cmd",
     }
 
     try {
-      const cwd = workingDirectory || process.cwd();
+      const cwd = workingDirectory || config.security.defaultPath;
       const { stdout, stderr } = await execAsync(`cmd.exe /c "${command}"`, { 
         cwd,
         timeout: config.security.timeoutSeconds * 1000
@@ -278,7 +280,7 @@ server.registerTool("shell",
     }
 
     try {
-      const cwd = workingDirectory || process.cwd();
+      const cwd = workingDirectory || config.security.defaultPath;
       let shellCommand;
       
       // Determine shell command based on OS and preference
@@ -372,6 +374,8 @@ server.registerTool("security-config",
 🔒 Blocked Commands: ${config.security.blockedCommands.length > 0 ? config.security.blockedCommands.join(", ") : "None"}
 
 📁 Allowed Partitions: ${config.security.allowedPartitions.length > 0 ? config.security.allowedPartitions.join(", ") : "All partitions allowed"}
+
+🏠 Default Path: ${config.security.defaultPath}
 
 📏 Max Command Length: ${config.security.maxCommandLength} characters
 

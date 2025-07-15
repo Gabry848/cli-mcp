@@ -29,6 +29,7 @@ Crea un file `config.json` nella directory root del progetto per personalizzare 
       "D:\\Projects\\",
       "E:\\Development\\"
     ],
+    "defaultPath": "C:\\Users\\",
     "blockedCommands": [
       "rm",
       "rmdir", 
@@ -77,9 +78,16 @@ Crea un file `config.json` nella directory root del progetto per personalizzare 
 ### Opzioni di Configurazione
 
 #### `allowedPartitions`
+
 - Array di percorsi consentiti per l'esecuzione dei comandi
 - Se vuoto, tutti i percorsi sono consentiti
 - Esempio: `["C:\\Users\\", "D:\\Projects\\"]`
+
+#### `defaultPath`
+
+- Percorso predefinito utilizzato quando non viene specificato un `workingDirectory`
+- Default: directory corrente del processo
+- Esempio: `"C:\\Users\\"`
 
 #### `blockedCommands`
 - Array di comandi o parole chiave bloccati
