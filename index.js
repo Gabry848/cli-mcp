@@ -4,8 +4,107 @@ import { z } from "zod";
 import { spawn, exec } from "child_process";
 import { promisify } from "util";
 import os from "os";
+import path from "path";
+import fs from "fs";
 
 const execAsync = promisify(exec);
+
+// Default security configuration
+const DEFAULT_CONFIG = {
+  security: {
+    allowedPartitions: [], // Empty array means all partitions allowed
+    blockedCommands: [
+      "rm", "rmdir", "del", "format", "fdisk", "diskpart",
+      "shutdown", "reboot", "restart", "halt", "poweroff",
+      "net user", "net localgroup", "adduser", "deluser",
+      "passwd", "chpasswd", "sudo", "su", "runas",
+      "reg delete", "reg add", "regedit", "gpedit",
+      "sc delete", "sc create", "sc config",
+      "taskkill", "wmic", "powercfg", "bcdedit"
+    ],
+    allowedCommandPatterns: [], // Regex patterns for allowed commands
+    maxCommandLength: 500,
+    timeoutSeconds: 30,
+    allowNetworkCommands: false
+  }
+};
+
+// Load configuration from config.json or use defaults
+let config = DEFAULT_CONFIG;
+try {
+  const configPath = path.join(process.cwd(), 'config.json');
+  if (fs.existsSync(configPath)) {
+    const configFile = fs.readFileSync(configPath, 'utf8');
+    config = { ...DEFAULT_CONFIG, ...JSON.parse(configFile) };
+    console.log('✅ Configuration loaded from config.json');
+  } else {
+    console.log('⚠️  No config.json found, using default configuration');
+  }
+} catch (error) {
+  console.error('❌ Error loading configuration:', error.message);
+  console.log('Using default configuration');
+}
+
+// Security validation functions
+function isCommandAllowed(command) {
+  // Check command length
+  if (command.length > config.security.maxCommandLength) {
+    return { allowed: false, reason: `Command exceeds maximum length of ${config.security.maxCommandLength} characters` };
+  }
+
+  // Check blocked commands
+  const lowerCommand = command.toLowerCase();
+  for (const blockedCmd of config.security.blockedCommands) {
+    if (lowerCommand.includes(blockedCmd.toLowerCase())) {
+      return { allowed: false, reason: `Command contains blocked keyword: ${blockedCmd}` };
+    }
+  }
+
+  // Check network commands if disabled
+  if (!config.security.allowNetworkCommands) {
+    const networkCommands = ['curl', 'wget', 'ping', 'nslookup', 'telnet', 'ssh', 'ftp', 'scp', 'rsync'];
+    for (const netCmd of networkCommands) {
+      if (lowerCommand.includes(netCmd)) {
+        return { allowed: false, reason: `Network command not allowed: ${netCmd}` };
+      }
+    }
+  }
+
+  // Check allowed command patterns (if any defined)
+  if (config.security.allowedCommandPatterns.length > 0) {
+    const allowed = config.security.allowedCommandPatterns.some(pattern => {
+      const regex = new RegExp(pattern, 'i');
+      return regex.test(command);
+    });
+    if (!allowed) {
+      return { allowed: false, reason: 'Command does not match any allowed patterns' };
+    }
+  }
+
+  return { allowed: true };
+}
+
+function isPathAllowed(workingDirectory) {
+  if (!workingDirectory) return { allowed: true };
+  
+  // Check allowed partitions
+  if (config.security.allowedPartitions.length > 0) {
+    const normalizedPath = path.normalize(workingDirectory).toLowerCase();
+    const allowed = config.security.allowedPartitions.some(partition => {
+      const normalizedPartition = path.normalize(partition).toLowerCase();
+      return normalizedPath.startsWith(normalizedPartition);
+    });
+    
+    if (!allowed) {
+      return { 
+        allowed: false, 
+        reason: `Access to path '${workingDirectory}' is not allowed. Allowed partitions: ${config.security.allowedPartitions.join(', ')}` 
+      };
+    }
+  }
+
+  return { allowed: true };
+}
 
 // Create an MCP server
 const server = new McpServer({
@@ -36,11 +135,32 @@ server.registerTool("powershell",
     }
   },
   async ({ command, workingDirectory }) => {
+    // Security checks
+    const commandCheck = isCommandAllowed(command);
+    if (!commandCheck.allowed) {
+      return {
+        content: [{
+          type: "text",
+          text: `❌ Command blocked: ${commandCheck.reason}`
+        }]
+      };
+    }
+
+    const pathCheck = isPathAllowed(workingDirectory);
+    if (!pathCheck.allowed) {
+      return {
+        content: [{
+          type: "text",
+          text: `❌ Path access denied: ${pathCheck.reason}`
+        }]
+      };
+    }
+
     try {
       const cwd = workingDirectory || process.cwd();
       const { stdout, stderr } = await execAsync(`powershell.exe -Command "${command.replace(/"/g, '""')}"`, { 
         cwd,
-        timeout: 30000 // 30 second timeout
+        timeout: config.security.timeoutSeconds * 1000
       });
       
       let output = "";
@@ -75,11 +195,32 @@ server.registerTool("cmd",
     }
   },
   async ({ command, workingDirectory }) => {
+    // Security checks
+    const commandCheck = isCommandAllowed(command);
+    if (!commandCheck.allowed) {
+      return {
+        content: [{
+          type: "text",
+          text: `❌ Command blocked: ${commandCheck.reason}`
+        }]
+      };
+    }
+
+    const pathCheck = isPathAllowed(workingDirectory);
+    if (!pathCheck.allowed) {
+      return {
+        content: [{
+          type: "text",
+          text: `❌ Path access denied: ${pathCheck.reason}`
+        }]
+      };
+    }
+
     try {
       const cwd = workingDirectory || process.cwd();
       const { stdout, stderr } = await execAsync(`cmd.exe /c "${command}"`, { 
         cwd,
-        timeout: 30000 // 30 second timeout
+        timeout: config.security.timeoutSeconds * 1000
       });
       
       let output = "";
@@ -115,6 +256,27 @@ server.registerTool("shell",
     }
   },
   async ({ command, workingDirectory, shell = "auto" }) => {
+    // Security checks
+    const commandCheck = isCommandAllowed(command);
+    if (!commandCheck.allowed) {
+      return {
+        content: [{
+          type: "text",
+          text: `❌ Command blocked: ${commandCheck.reason}`
+        }]
+      };
+    }
+
+    const pathCheck = isPathAllowed(workingDirectory);
+    if (!pathCheck.allowed) {
+      return {
+        content: [{
+          type: "text",
+          text: `❌ Path access denied: ${pathCheck.reason}`
+        }]
+      };
+    }
+
     try {
       const cwd = workingDirectory || process.cwd();
       let shellCommand;
@@ -136,7 +298,7 @@ server.registerTool("shell",
       
       const { stdout, stderr } = await execAsync(shellCommand, { 
         cwd,
-        timeout: 30000,
+        timeout: config.security.timeoutSeconds * 1000,
         shell: shell === "bash" ? "/bin/bash" : undefined
       });
       
@@ -189,6 +351,37 @@ Architecture: ${arch}
 Release: ${release}
 Available Shells: ${availableShells.join(", ")}
 Current Working Directory: ${process.cwd()}`
+      }]
+    };
+  }
+);
+
+// Add tool to get security configuration
+server.registerTool("security-config",
+  {
+    title: "Security Configuration",
+    description: "Get current security configuration and restrictions",
+    inputSchema: {}
+  },
+  async () => {
+    return {
+      content: [{
+        type: "text",
+        text: `Security Configuration:
+        
+🔒 Blocked Commands: ${config.security.blockedCommands.length > 0 ? config.security.blockedCommands.join(", ") : "None"}
+
+📁 Allowed Partitions: ${config.security.allowedPartitions.length > 0 ? config.security.allowedPartitions.join(", ") : "All partitions allowed"}
+
+📏 Max Command Length: ${config.security.maxCommandLength} characters
+
+⏱️ Timeout: ${config.security.timeoutSeconds} seconds
+
+🌐 Network Commands: ${config.security.allowNetworkCommands ? "Allowed" : "Blocked"}
+
+✅ Allowed Command Patterns: ${config.security.allowedCommandPatterns.length > 0 ? config.security.allowedCommandPatterns.join(", ") : "None defined"}
+
+📝 Config File: ${fs.existsSync(path.join(process.cwd(), 'config.json')) ? "config.json loaded" : "Using default configuration"}`
       }]
     };
   }

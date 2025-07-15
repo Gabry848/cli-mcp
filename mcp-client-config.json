@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "cli-mcp-server": {
+      "command": "node",
+      "args": ["index.js"],
+      "cwd": "e:\\MCP_servers\\cli-mcp",
+      "env": {
+        "NODE_ENV": "production"
+      }
+    }
+  }
+}
