@@ -1,0 +1,10 @@
+{
+  "type": "module",
+  "name": "cli-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server with terminal command execution support",
+  "main": "index.js",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.15.1"
+  }
+}
