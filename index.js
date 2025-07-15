@@ -408,5 +408,8 @@ server.registerResource(
 );
 
 // Start receiving messages on stdin and sending messages on stdout
+console.log('🚀 Starting MCP server...');
 const transport = new StdioServerTransport();
+console.log('🔌 Transport created, connecting...');
 await server.connect(transport);
+console.log('✅ MCP server connected and ready!');

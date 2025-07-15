@@ -5,6 +5,7 @@
   "description": "MCP server with terminal command execution support",
   "main": "index.js",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.15.1"
+    "@modelcontextprotocol/sdk": "^1.15.1",
+    "zod": "^3.25.76"
   }
 }
