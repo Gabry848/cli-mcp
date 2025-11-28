@@ -1,3 +1,3 @@
 @echo off
-cd /d "e:\MCP_servers\cli-mcp"
+cd /d "%~dp0"
 node index.js
