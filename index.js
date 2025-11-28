@@ -9,6 +9,18 @@ import fs from "fs";
 
 const execAsync = promisify(exec);
 
+// Helper function to escape PowerShell commands
+function escapePowerShellCommand(command) {
+  // Escape single quotes by doubling them
+  return command.replace(/'/g, "''");
+}
+
+// Helper function to escape CMD commands
+function escapeCmdCommand(command) {
+  // Escape special characters for CMD
+  return command.replace(/([&|<>^])/g, '^$1');
+}
+
 // Default security configuration
 const DEFAULT_CONFIG = {
   security: {
@@ -30,13 +42,26 @@ const DEFAULT_CONFIG = {
   }
 };
 
+// Deep merge function
+function deepMerge(target, source) {
+  const output = { ...target };
+  for (const key in source) {
+    if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+      output[key] = deepMerge(target[key] || {}, source[key]);
+    } else {
+      output[key] = source[key];
+    }
+  }
+  return output;
+}
+
 // Load configuration from config.json or use defaults
 let config = DEFAULT_CONFIG;
 try {
   const configPath = path.join(process.cwd(), 'config.json');
   if (fs.existsSync(configPath)) {
     const configFile = fs.readFileSync(configPath, 'utf8');
-    config = { ...DEFAULT_CONFIG, ...JSON.parse(configFile) };
+    config = deepMerge(DEFAULT_CONFIG, JSON.parse(configFile));
     console.log('✅ Configuration loaded from config.json');
   } else {
     console.log('⚠️  No config.json found, using default configuration');
@@ -56,7 +81,9 @@ function isCommandAllowed(command) {
   // Check blocked commands
   const lowerCommand = command.toLowerCase();
   for (const blockedCmd of config.security.blockedCommands) {
-    if (lowerCommand.includes(blockedCmd.toLowerCase())) {
+    // Use word boundary to match command as whole word or at start of path
+    const regex = new RegExp(`(^|\\s|[;&|])${blockedCmd.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$|[;&|])`, 'i');
+    if (regex.test(lowerCommand)) {
       return { allowed: false, reason: `Command contains blocked keyword: ${blockedCmd}` };
     }
   }
@@ -88,7 +115,31 @@ function isCommandAllowed(command) {
 function isPathAllowed(workingDirectory) {
   // Use default path if no working directory is specified
   const pathToCheck = workingDirectory || config.security.defaultPath;
-  
+
+  // Check if path exists
+  if (!fs.existsSync(pathToCheck)) {
+    return {
+      allowed: false,
+      reason: `Path '${pathToCheck}' does not exist`
+    };
+  }
+
+  // Check if path is a directory
+  try {
+    const stats = fs.statSync(pathToCheck);
+    if (!stats.isDirectory()) {
+      return {
+        allowed: false,
+        reason: `Path '${pathToCheck}' is not a directory`
+      };
+    }
+  } catch (error) {
+    return {
+      allowed: false,
+      reason: `Cannot access path '${pathToCheck}': ${error.message}`
+    };
+  }
+
   // Check allowed partitions
   if (config.security.allowedPartitions.length > 0) {
     const normalizedPath = path.normalize(pathToCheck).toLowerCase();
@@ -96,11 +147,11 @@ function isPathAllowed(workingDirectory) {
       const normalizedPartition = path.normalize(partition).toLowerCase();
       return normalizedPath.startsWith(normalizedPartition);
     });
-    
+
     if (!allowed) {
-      return { 
-        allowed: false, 
-        reason: `Access to path '${pathToCheck}' is not allowed. Allowed partitions: ${config.security.allowedPartitions.join(', ')}` 
+      return {
+        allowed: false,
+        reason: `Access to path '${pathToCheck}' is not allowed. Allowed partitions: ${config.security.allowedPartitions.join(', ')}`
       };
     }
   }
@@ -160,7 +211,8 @@ server.registerTool("powershell",
 
     try {
       const cwd = workingDirectory || config.security.defaultPath;
-      const { stdout, stderr } = await execAsync(`powershell.exe -Command "${command.replace(/"/g, '""')}"`, { 
+      const escapedCommand = escapePowerShellCommand(command);
+      const { stdout, stderr } = await execAsync(`powershell.exe -Command '${escapedCommand}'`, {
         cwd,
         timeout: config.security.timeoutSeconds * 1000
       });
@@ -220,9 +272,11 @@ server.registerTool("cmd",
 
     try {
       const cwd = workingDirectory || config.security.defaultPath;
-      const { stdout, stderr } = await execAsync(`cmd.exe /c "${command}"`, { 
+      // For CMD, we use the command directly as child_process handles escaping
+      const { stdout, stderr } = await execAsync(command, {
         cwd,
-        timeout: config.security.timeoutSeconds * 1000
+        timeout: config.security.timeoutSeconds * 1000,
+        shell: 'cmd.exe'
       });
       
       let output = "";
@@ -282,27 +336,32 @@ server.registerTool("shell",
     try {
       const cwd = workingDirectory || config.security.defaultPath;
       let shellCommand;
-      
+      let execOptions = {
+        cwd,
+        timeout: config.security.timeoutSeconds * 1000
+      };
+
       // Determine shell command based on OS and preference
       if (shell === "auto") {
         if (os.platform() === "win32") {
-          shellCommand = `powershell.exe -Command "${command.replace(/"/g, '""')}"`;
+          const escapedCommand = escapePowerShellCommand(command);
+          shellCommand = `powershell.exe -Command '${escapedCommand}'`;
         } else {
           shellCommand = command;
+          execOptions.shell = "/bin/bash";
         }
       } else if (shell === "powershell") {
-        shellCommand = `powershell.exe -Command "${command.replace(/"/g, '""')}"`;
+        const escapedCommand = escapePowerShellCommand(command);
+        shellCommand = `powershell.exe -Command '${escapedCommand}'`;
       } else if (shell === "cmd") {
-        shellCommand = `cmd.exe /c "${command}"`;
+        shellCommand = command;
+        execOptions.shell = 'cmd.exe';
       } else {
         shellCommand = command;
+        execOptions.shell = "/bin/bash";
       }
-      
-      const { stdout, stderr } = await execAsync(shellCommand, { 
-        cwd,
-        timeout: config.security.timeoutSeconds * 1000,
-        shell: shell === "bash" ? "/bin/bash" : undefined
-      });
+
+      const { stdout, stderr } = await execAsync(shellCommand, execOptions);
       
       let output = "";
       if (stdout) output += `Output:\n${stdout}`;
